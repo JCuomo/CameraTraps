@@ -34,39 +34,7 @@ def log_failed_image(image_path: str, reason: str, file):
         json.dump(error_data, file)
         file.write("\n")
 
-
-def list_species_in_images(images_dir):
-    """
-    Check metadata of images recursively found in  images_dir and writes:
-     - species.txt with a list of unique species in A__Species
-     - species_count.txt with a list of unique species in B__No
-    """
-    species = set()  # from A__Species|...
-    species_count = set()  # from B_No|...
-    output_file_species = os.path.join(images_dir, "species.txt")
-    output_file_species_count = os.path.join(images_dir, "species_count.txt")
-    for root, dirs, files in os.walk(images_dir):
-        # if root != "./": # just process current dir for testing purposes
-        #     continue
-        for image_file in files:
-            if image_file.lower().endswith(".jpg"):
-                metadata = read_metadata(os.path.join(root, image_file))
-                if isinstance(metadata.get("HierarchicalSubject"), list):
-                    for item in metadata["HierarchicalSubject"]:
-                        if "|" not in item:
-                            continue
-                        tag, value = item.split("|")
-                        if tag.startswith("A__Species"):
-                            species.add(value)
-                        if tag.startswith("B__No"):
-                            species_count.add(tag)
-        with open(output_file_species, "w") as species_file:
-            json.dump(list(species), species_file)
-        with open(output_file_species_count, "w") as species_count_file:
-            json.dump(list(species_count), species_count_file)
-
-
-def process_image(image_path, species, species_count, lock):
+def get_species(image_path, species, species_count, lock):
     metadata = read_metadata(image_path)
     if isinstance(metadata.get("HierarchicalSubject"), list):
         for item in metadata["HierarchicalSubject"]:
@@ -79,7 +47,8 @@ def process_image(image_path, species, species_count, lock):
                 if tag.startswith("B__No"):
                     species_count.add(tag)
 
-def list_species_in_images_threads(images_dir):
+
+def list_species_in_images_threads(images_dir, output_dir):
     """
     Check metadata of images recursively found in images_dir and writes:
      - species.txt with a list of unique species in A__Species
@@ -87,19 +56,26 @@ def list_species_in_images_threads(images_dir):
     """
     species = set()  # from A__Species|...
     species_count = set()  # from B_No|...
-    output_file_species = os.path.join(images_dir, "species.txt")
-    output_file_species_count = os.path.join(images_dir, "species_count.txt")
+    output_file_species = os.path.join(output_dir, "species.txt")
+    output_file_species_count = os.path.join(output_dir, "species_count.txt")
     image_files = []
-
+    start_time = time.time()
     for root, dirs, files in os.walk(images_dir):
         for image_file in files:
             if image_file.lower().endswith(".jpg"):
                 image_files.append(os.path.join(root, image_file))
 
     lock = threading.Lock()
-    
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_image, image_file, species, species_count, lock) for image_file in image_files]
+    num_cores = os.cpu_count()
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=num_cores
+    ) as executor:
+        futures = [
+            executor.submit(
+                get_species, image_file, species, species_count, lock
+            )
+            for image_file in image_files
+        ]
         concurrent.futures.wait(futures)
 
     with open(output_file_species, "w") as species_file:
@@ -107,6 +83,9 @@ def list_species_in_images_threads(images_dir):
 
     with open(output_file_species_count, "w") as species_count_file:
         json.dump(list(species_count), species_count_file)
+    logger.info(f"Time to complete:{time.time()-start_time}")
+    print(f"Time to complete:{time.time()-start_time}")
+
 
 def get_counts(image_path, failed_file=None, indet_file=None):
     """
@@ -117,37 +96,38 @@ def get_counts(image_path, failed_file=None, indet_file=None):
     metadata = read_metadata(image_path)
     species_count = {}  # from B__No...|N
     species = []  # from A__Species|...
-    if isinstance(metadata.get("HierarchicalSubject"), list):
-        for item in metadata["HierarchicalSubject"]:
-            if item.startswith("A__By"):
-                continue
-            if "|" not in item:
-                log_failed_image(
-                    image_path,
-                    f"Tag {item} doesn't have '|'",
-                    failed_file,
-                )
-                return {}  # discard malformed metadata
-            tag, value = item.split("|")
-            if tag.startswith("A__Species"):
-                species.append(value)
-                if "indet" in value.lower():
+    items = metadata.get("HierarchicalSubject")
+    if isinstance(items, list):
+        try:
+            for item in metadata["HierarchicalSubject"]:
+                if item.startswith("A__By"):
+                    continue
+                if "|" not in item:
                     log_failed_image(
                         image_path,
-                        f"Specie: {value}",
-                        indet_file,
+                        f"Tag {item} doesn't have '|'",
+                        failed_file,
                     )
-                    return {}
-            if tag.startswith("B__No"):
-                species_count[tag] = value
-
-    species_exceptions: list[str] = [
-        "Lycalopex culpaeus",
-        "Puma concolor",
-        "Personnel",
-        "Lycalopex griseus",
-    ]
-
+                    return {}  # discard malformed metadata
+                tag, value = item.split("|")
+                if tag.startswith("A__Species"):
+                    species.append(value)
+                    if "indet" in value.lower():
+                        log_failed_image(
+                            image_path,
+                            f"Specie: {value}",
+                            indet_file,
+                        )
+                        return {}
+                if tag.startswith("B__No"):
+                    species_count[tag] = value
+        except Exception:
+            log_failed_image(
+                image_path,
+                f"Unkwonk failure:{item}",
+                failed_file,
+            )
+            return {}
     # verify mismatch between metadata
     if len(species) != len(species_count.keys()):
         # after initial check, made a secondary check for specific species than don't require count specification
@@ -156,9 +136,14 @@ def get_counts(image_path, failed_file=None, indet_file=None):
             "Puma concolor",
             "Personnel",
             "Lycalopex griseus",
+            "Cathartes aura",
+            "Phalcoboenus megalopterus"
+            "Vultur gryphus"
+            "Geranoaetus polyosoma"
+            "Lepus europaeus"
         ]
         for specie in species_exceptions:
-            if specie in species and specie not in species_count:
+            if specie in species and len(species)==1 and not species_count:
                 species_count["B__No"+specie] = 1
         if len(species) != len(species_count.keys()):
             log_failed_image(
@@ -167,6 +152,7 @@ def get_counts(image_path, failed_file=None, indet_file=None):
                 failed_file,
             )
             return {}
+
     return species_count
 
 def filter_single_species_images(images_dir, output_dir):
@@ -183,8 +169,8 @@ def filter_single_species_images(images_dir, output_dir):
     malformed_metadata_path = os.path.join(output_dir, "malformed_metadata.json")
     indet_metadata_path = os.path.join(output_dir, "indet_metadata.json")
     
-    with open(malformed_metadata_path, "w") as malformed_metadata_file, \
-         open(indet_metadata_path, "w") as indet_metadata_file:
+    with open(malformed_metadata_path, "a") as malformed_metadata_file, \
+         open(indet_metadata_path, "a") as indet_metadata_file:
 
         for root, _, files in os.walk(images_dir):
             useful_training_image = []
@@ -249,12 +235,22 @@ def merge_labels(labels_dir):
 
 
 if __name__ == "__main__":
-    images_dir = "/home/jcuomo/CamaraTrampa/images"
-    output_dir = "/home/jcuomo/CamaraTrampa/step1_output"
+    images_dir = "/home/jcuomo/CameraTraps/images/labeled"
+    output_dir = "/home/jcuomo/CameraTraps/output/classification/step1_output"
+    # Step 1: find what species are in the photos and 
+    # manually make sure there is consistency in the naming
+    # estimated time in 12 core: 0.025sec per image
+
+    # list_species_in_images_threads(images_dir, output_dir)
+
+    st = time.time()
+    filter_single_species_images(images_dir, output_dir)
+    print("single thread:",time.time()-st)
+
+    # Step 2:
     # image = "/Users/jcuomo/CamaraTrampa/image1.JPG"
-    # list_species_in_images("/Users/jcuomo/CamaraTrampa/images")
+    # list_species_in_images(images_dir)
     # get_counts(image_path=image)
-    list_species_in_images_threads(images_dir)
     # filter_single_species_images(images_dir, output_dir)
     # merge_labels(output_dir)
     # images_dirs = [
