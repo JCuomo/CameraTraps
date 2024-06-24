@@ -14,11 +14,16 @@ else
     pip install humanfriendly jsonpickle ultralytics
 fi
 
+# Get the directory of the script
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+
 # Define paths and URLs
 MODEL_URL="https://github.com/agentmorris/MegaDetector/releases/download/v5.0/md_v5a.0.0.pt"
 MEGADETECTOR_REPO="https://github.com/agentmorris/MegaDetector"
 YOLV5_REPO="https://github.com/ultralytics/yolov5"
-DOWNLOAD_DIR="../downloads"
+RELATIVE_DOWNLOAD_DIR="$SCRIPT_DIR/../downloads"
+DOWNLOAD_DIR=$(realpath "$RELATIVE_DOWNLOAD_DIR")
+echo DOWNLOAD_DIR $DOWNLOAD_DIR
 MODEL_PATH="$DOWNLOAD_DIR/md_v5a.0.0.pt"
 MEGADETECTOR_DIR="$DOWNLOAD_DIR/MegaDetector"
 YOLV5_DIR="$DOWNLOAD_DIR/yolov5"
@@ -63,6 +68,7 @@ fi
 
 # Set PYTHONPATH
 export PYTHONPATH=$PYTHONPATH:$MEGADETECTOR_DIR:$YOLV5_DIR
+echo "$MEGADETECTOR_DIR:$YOLV5_DIR"
 echo "export PYTHONPATH=\$PYTHONPATH:$MEGADETECTOR_DIR:$YOLV5_DIR" >> ~/.bashrc
 
 echo "Setup completed. PYTHONPATH updated."

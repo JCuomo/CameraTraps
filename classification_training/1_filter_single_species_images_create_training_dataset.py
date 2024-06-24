@@ -17,7 +17,7 @@ import numpy as np
 import concurrent.futures
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 def read_metadata(image_path):
@@ -28,7 +28,7 @@ def read_metadata(image_path):
 
 
 def log_failed_image(image_path: str, reason: str, file):
-    logger.info(f"image:{image_path} || {reason}")
+    logger.debug(f"image:{image_path} || {reason}")
     if file:
         error_data = {"image_path": image_path, "reason": reason}
         json.dump(error_data, file)
@@ -93,12 +93,13 @@ def get_counts(image_path, failed_file=None, indet_file=None):
         a dictionary with the tagged species:count in an image.
         an empty dictionary if the metadata is malformed/wrong.
     """
-    metadata = read_metadata(image_path)
-    species_count = {}  # from B__No...|N
-    species = []  # from A__Species|...
-    items = metadata.get("HierarchicalSubject")
-    if isinstance(items, list):
-        try:
+    item = None
+    try:
+        metadata = read_metadata(image_path)
+        species_count = {}  # from B__No...|N
+        species = []  # from A__Species|...
+        items = metadata.get("HierarchicalSubject")
+        if isinstance(items, list):
             for item in metadata["HierarchicalSubject"]:
                 if item.startswith("A__By"):
                     continue
@@ -121,13 +122,14 @@ def get_counts(image_path, failed_file=None, indet_file=None):
                         return {}
                 if tag.startswith("B__No"):
                     species_count[tag] = value
-        except Exception:
-            log_failed_image(
-                image_path,
-                f"Unkwonk failure:{item}",
-                failed_file,
-            )
-            return {}
+    except Exception as e:
+        reason = item or e
+        log_failed_image(
+            image_path,
+            f"Unkwonk failure:{reason}",
+            failed_file,
+        )
+        return {}
     # verify mismatch between metadata
     if len(species) != len(species_count.keys()):
         # after initial check, made a secondary check for specific species than don't require count specification
@@ -155,6 +157,18 @@ def get_counts(image_path, failed_file=None, indet_file=None):
 
     return species_count
 
+def get_folder_names_from_files(directory):
+    """
+    Extracts folder names from file names in the given directory.
+    Assumes files are named like <folder_name>_images.json and <folder_name>_labels.json.
+    """
+    folder_names = set()
+    for file_name in os.listdir(directory):
+        if file_name.endswith('_images.json') or file_name.endswith('_labels.json'):
+            folder_name = file_name[:-12]
+            folder_names.add(folder_name)
+    return folder_names
+
 def filter_single_species_images(images_dir, output_dir):
     """
     Filter images with only 1 species (any number of individuals of the same species)
@@ -166,22 +180,25 @@ def filter_single_species_images(images_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
+    already_processed = get_folder_names_from_files(output_dir)
     malformed_metadata_path = os.path.join(output_dir, "malformed_metadata.json")
     indet_metadata_path = os.path.join(output_dir, "indet_metadata.json")
-    
+    n_images = 0
     with open(malformed_metadata_path, "a") as malformed_metadata_file, \
          open(indet_metadata_path, "a") as indet_metadata_file:
 
         for root, _, files in os.walk(images_dir):
+            if os.path.basename(root) in already_processed: 
+                logger.info(f"Skipping {root}, already processed")
+                continue
             useful_training_image = []
             labels = {}
-
             start_root_path = os.path.split(root)[-1]
 
             for file in files:
                 if not file.lower().endswith(".jpg"):
                     continue
-
+                n_images += 1
                 start_time = time.time()
                 full_image_path = os.path.join(root, file)
                 counts = get_counts(full_image_path, malformed_metadata_file, indet_metadata_file)
@@ -205,12 +222,16 @@ def filter_single_species_images(images_dir, output_dir):
                 with open(output_file_labels, "w") as fw_labels:
                     json.dump(labels, fw_labels)
 
+            logger.info(f"Processed folder {root}: {len(files)} files")
+
     if time_per_image:
         time_per_image = np.array(time_per_image)
         mean_time = time_per_image.mean()
         std_time = time_per_image.std()
         logger.debug(f"Average time taken to process an image: {mean_time} +- {std_time}")
         print(f"Average time taken to process an image: {mean_time} +- {std_time}")
+
+    logger.info(f"Processed {n_images} images")
 
 
 def merge_labels(labels_dir):
@@ -240,30 +261,13 @@ if __name__ == "__main__":
     # Step 1: find what species are in the photos and 
     # manually make sure there is consistency in the naming
     # estimated time in 12 core: 0.025sec per image
-
     # list_species_in_images_threads(images_dir, output_dir)
 
-    st = time.time()
-    filter_single_species_images(images_dir, output_dir)
-    print("single thread:",time.time()-st)
-
-    # Step 2:
-    # image = "/Users/jcuomo/CamaraTrampa/image1.JPG"
-    # list_species_in_images(images_dir)
-    # get_counts(image_path=image)
+    # Step 2: filter images with only one specie
+    # st = time.time()
     # filter_single_species_images(images_dir, output_dir)
-    # merge_labels(output_dir)
-    # images_dirs = [
-    #     "/content/drive/MyDrive/CamarasAspen/CH01__Vic 36 VHF__L1__Carrion",
-    #     "/content/drive/MyDrive/CamarasAspen/CH07__P70510151__V1",
-    #     "/content/drive/MyDrive/CamarasAspen/CH08__P40406151__V2",
-    #     "/content/drive/MyDrive/CamarasAspen/CH09__P30410142__L1__Carrion",
-    #     "/content/drive/MyDrive/CamarasAspen/VIC__01012014__01__Carrion",
-    #     "/content/drive/MyDrive/CamarasAspen/Vic__010317__01__Carrion",
-    #     "/content/drive/MyDrive/CamarasAspen/Vic__270217__01__Carrion",
-    # ]
-    # for images_dir in images_dirs:
-    #     print("DIRECTORY:", images_dir)
-    #     select_images(images_dir)
-    # directory_path = "/content/drive/MyDrive/CamarasAspen/training_data_Abril24"
-    # merge_labels(directory_path)
+    # print("single thread:",time.time()-st)
+
+    # Step 3: merge *_labels.json to all_labels.json
+    merge_labels(output_dir)
+  
