@@ -7,51 +7,55 @@ trains a model given 2 json files:
 - <images_name>_labels.json: containing the image name and the corresponding label that should be unique to animal occurences (i.e. same for all bboxes)
 """
 
+from collections import Counter
 import logging
 import time
-from sklearn.model_selection import train_test_split
 import json
 import numpy as np
+import os
+from collections.abc import Sequence
+from PIL import Image, ImageOps
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections.abc import Sequence
-from PIL import Image, ImageOps
 from transformers import ViTForImageClassification
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.nn.functional as F
-import os
 
+# Set up logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-
-
 def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
     """
+    Get or create train/validation/test splits.
 
+    Args:
+        splits_dir (str): Directory to save/load splits.
+        detections_json (str): Path to detections json file.
+        labels_json (str): Path to labels json file.
+
+    Returns:
+        Tuple: train, validation, and test splits along with label dictionaries.
     """
     # Split files paths
-    train_split_file = os.path.join(splits_dir,"train_split.json")
-    val_split_file = os.path.join(splits_dir,"val_split.json")
-    test_split_file = os.path.join(splits_dir,"test_split.json")
+    train_split_file = os.path.join(splits_dir, "train_split.json")
+    val_split_file = os.path.join(splits_dir, "val_split.json")
+    test_split_file = os.path.join(splits_dir, "test_split.json")
 
-
-    # Function to save splits
     def save_splits(filename, splits):
         with open(filename, 'w') as f:
             json.dump(splits, f)
 
-    # Function to load splits
     def load_splits(filename):
         with open(filename, 'r') as f:
             splits = json.load(f)
         return splits
 
-    # Check if splits already exist
     if all(os.path.exists(f) for f in [train_split_file, val_split_file, test_split_file]):
         logger.info("Loading existing splits...")
         train_split = load_splits(train_split_file)
@@ -65,10 +69,9 @@ def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
         images_test = test_split["images"]
         labels_test = test_split["labels"]
     else:
-        # File paths
         if not detections_json or not labels_json:
-            logger.info("No splits found and no jsons specificed")
-            return 
+            logger.error("No splits found and no jsons specified")
+            return
 
         confidence_threshold = 0.2
         images_info = []
@@ -81,23 +84,16 @@ def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
                 for image_data in data["images"]:
                     image_path = image_data["file"]
 
-                    # Check if any bbox has confidence over the threshold
-                    has_bbox_with_high_confidence = False
                     if "failure" in image_data:
                         continue
-                    n = 0
-                    for bbox in image_data["detections"]:
-                        # if bbox["category"] != "1":
-                        #     continue
+
+                    for n, bbox in enumerate(image_data["detections"]):
                         if bbox["conf"] > confidence_threshold:
-                            images_info.append(
-                                (f"{image_data['file']}_{n}", bbox["bbox"])
-                            )
-                            labels_info.append(
-                                (f"{image_data['file']}_{n}", gt_labels[image_path])
-                            )
-        logger.info("Dataset size:", len(images_info))
-        logger.info("Labels count:", len(labels_info))
+                            images_info.append((f"{image_data['file']}_{n}", bbox["bbox"]))
+                            labels_info.append((f"{image_data['file']}_{n}", gt_labels[image_path]))
+        
+        logger.info(f"Dataset size: {len(images_info)}")
+        logger.info(f"Labels count: {len(labels_info)}")
 
         logger.info("Creating new splits...")
         images_train, images_valtest, labels_train, labels_valtest = train_test_split(
@@ -107,35 +103,29 @@ def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
             images_valtest, labels_valtest, test_size=0.5, random_state=42
         )
 
-        # Save splits to disk
         save_splits(train_split_file, {"images": images_train, "labels": labels_train})
         save_splits(val_split_file, {"images": images_val, "labels": labels_val})
         save_splits(test_split_file, {"images": images_test, "labels": labels_test})
 
-    # Convert labels to numerical values
-    # sorting the labels is critical for getting the same dict every time
-    labels_names = sorted(list(set([animal for path, animal in labels_train + labels_val + labels_test])))
-    label_dict = {
-        class_name: label for label, class_name in enumerate(labels_names)
-    }
-    reversed_label_dict = {
-        label_number: class_name for class_name, label_number in label_dict.items()
-    }
-    return images_train,labels_train,images_val,labels_val,images_test,labels_test,label_dict,reversed_label_dict
+    labels_names = sorted(list(set(label for _, label in labels_train + labels_val + labels_test)))
+    label_dict = {class_name: label for label, class_name in enumerate(labels_names)}
+    reversed_label_dict = {label_number: class_name for class_name, label_number in label_dict.items()}
+    
+    return images_train, labels_train, images_val, labels_val, images_test, labels_test, label_dict, reversed_label_dict
 
 
 def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
     """
-    Crops an image
+    Crops an image.
+
     Args:
-        img: PIL.Image.Image object, already loaded
-        bbox_norm: list or tuple of float, [xmin, ymin, width, height] all in
-            normalized coordinates
-        square_crop: bool, whether to crop bounding boxes as a square
+        img (Image.Image): PIL Image object.
+        bbox_norm (list/tuple): Normalized coordinates [xmin, ymin, width, height].
+        square_crop (bool): Whether to crop bounding boxes as a square.
 
-    Returns: PIL.Image.Image object, cropped image
+    Returns:
+        Image.Image: Cropped image.
     """
-
     img_w, img_h = img.size
     xmin = int(bbox_norm[0] * img_w)
     ymin = int(bbox_norm[1] * img_h)
@@ -143,7 +133,6 @@ def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
     box_h = int(bbox_norm[3] * img_h)
 
     if square_crop:
-        # Ensure the crop box is square and within image boundaries
         box_size = max(box_w, box_h)
         xmin = max(0, min(xmin - int((box_size - box_w) / 2), img_w - box_size))
         ymin = max(0, min(ymin - int((box_size - box_h) / 2), img_h - box_size))
@@ -153,20 +142,18 @@ def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
     if box_w == 0 or box_h == 0:
         return None
 
-    # Image.crop() takes box=[left, upper, right, lower]
     crop = img.crop((xmin, ymin, xmin + box_w, ymin + box_h))
 
     if square_crop:
-        # Pad to square using 0s if necessary
         crop = ImageOps.pad(crop, size=(box_size, box_size), color=0)
 
     return crop
 
-# Define your custom dataset
+
 class CustomDataset(Dataset):
     def __init__(self, images, labels, label_dict, transform=None):
         self.images = images
-        self.labels = labels  # torch.tensor(labels, dtype=torch.long)
+        self.labels = labels
         self.transform = transform
         self.label_dict = label_dict
 
@@ -175,12 +162,14 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         image_path_idx, bbox = self.images[idx]
-        image_name = image_path_idx[: image_path_idx.rfind("_")]
+        image_name = image_path_idx[:image_path_idx.rfind("_")]
         try:
             full_image = Image.open(image_name)
             crop_image = get_crop(full_image, bbox, square_crop=True)
+            if crop_image is None:
+                raise ValueError("Invalid crop dimensions")
         except Exception as e:
-            logger.debug(f"Error loading or cropping image: {image_name}, {e}")
+            logger.error(f"Error loading or cropping image: {image_name}, {e}")
             return None, None
         
         image_path_idx_label, label = self.labels[idx]
@@ -193,38 +182,136 @@ class CustomDataset(Dataset):
         return crop_image, self.label_dict[label]
 
 
-# Define your transform
 def get_transform():
+    """
+    Get the transformation pipeline.
+
+    Returns:
+        transforms.Compose: Transform pipeline.
+    """
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
     ])
 
-# Initialize the model
+
 def initialize_model(label_dict):
+    """
+    Initialize the Vision Transformer model.
+
+    Args:
+        label_dict (dict): Dictionary mapping labels to numerical values.
+
+    Returns:
+        ViTForImageClassification: Initialized model.
+    """
     model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224")
     for param in model.parameters():
         param.requires_grad = False
     num_features = model.config.hidden_size
-    num_classes = len(label_dict.keys())
+    num_classes = len(label_dict)
     model.classifier = nn.Linear(num_features, num_classes)
     return model
 
-# Create datasets and dataloaders
-def create_dataloader(images, labels, label_dict, transform, batch_size=32, shuffle=False):
-    dataset = CustomDataset(images, labels, transform=transform, label_dict=label_dict)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count(), pin_memory=True)
-    return dataloader
 
-# Define your optimizer
+def create_dataloader(images, labels, label_dict, transform, batch_size=32, shuffle=False):
+    """
+    Create a DataLoader.
+
+    Args:
+        images (list): List of image paths and bounding boxes.
+        labels (list): List of labels.
+        label_dict (dict): Dictionary mapping labels to numerical values.
+        transform (transforms.Compose): Transform pipeline.
+        batch_size (int): Batch size.
+        shuffle (bool): Whether to shuffle the data.
+
+    Returns:
+        DataLoader: DataLoader object.
+    """
+    dataset = CustomDataset(images, labels, label_dict, transform=transform)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count(), pin_memory=True)
+
+def augment_minority_classes(images, labels, label_dict, augmentations=None, augmentation_factor=2):
+    """
+    Augment minority classes in the dataset.
+
+    Args:
+        images (list): List of image paths and bounding boxes.
+        labels (list): List of labels corresponding to the images.
+        label_dict (dict): Dictionary mapping class names to numerical labels.
+        augmentations (list): List of torchvision transforms for augmentation.
+        augmentation_factor (int): Number of times to augment each minority class sample.
+
+    Returns:
+        Tuple: Augmented images and labels.
+    """
+    if augmentations is None:
+        augmentations = [
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(30),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            transforms.RandomGrayscale(p=0.1)
+        ]
+    
+    label_counts = Counter(label for _, label in labels)
+    max_count = max(label_counts.values())
+
+    augmented_images = images.copy()
+    augmented_labels = labels.copy()
+
+    for label, count in label_counts.items():
+        if count < max_count:
+            shortfall = max_count - count
+            samples_needed = shortfall * augmentation_factor
+            samples = [(img, lbl) for img, lbl in zip(images, labels) if lbl == label]
+            for img, lbl in samples:
+                for _ in range(samples_needed // len(samples)):
+                    image_path_idx, bbox = img
+                    image_name = image_path_idx[: image_path_idx.rfind("_")]
+                    full_image = Image.open(image_name)
+                    crop_image = get_crop(full_image, bbox, square_crop=True)
+
+                    for augmentation in augmentations:
+                        augmented_image = augmentation(crop_image)
+                        augmented_image_path_idx = f"{image_name}_{len(augmented_images)}"
+                        augmented_images.append((augmented_image_path_idx, bbox))
+                        augmented_labels.append((augmented_image_path_idx, lbl))
+
+    return augmented_images, augmented_labels
+
+
 def get_optimizer(model):
+    """
+    Get the optimizer.
+
+    Args:
+        model (nn.Module): Model.
+
+    Returns:
+        torch.optim.Optimizer: Optimizer.
+    """
     return torch.optim.Adam(model.classifier.parameters(), lr=0.001)
 
 
-# Training loop
 def train_model(model, train_dataloader, val_dataloader, optimizer, device, output_dir, num_epochs=20, checkpoint_interval=1):
+    """
+    Train the model.
+
+    Args:
+        model (nn.Module): Model.
+        train_dataloader (DataLoader): Training DataLoader.
+        val_dataloader (DataLoader): Validation DataLoader.
+        optimizer (torch.optim.Optimizer): Optimizer.
+        device (torch.device): Device to train on.
+        output_dir (str): Directory to save model checkpoints.
+        num_epochs (int): Number of epochs.
+        checkpoint_interval (int): Interval to save checkpoints.
+
+    Returns:
+        None
+    """
     model.to(device)
-    model.classifier.to(device)
     start_time = time.time()
     for epoch in range(num_epochs):
         logger.info(f"Epoch [{epoch + 1}/{num_epochs}]")
@@ -240,24 +327,48 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, device, outp
             loss.backward()
             optimizer.step()
             if (batch + 1) % 20 == 0:
-                logger.info(f"    Batch [{batch + 1}/{len(train_dataloader)}], Loss: {loss.item():.4f}, Time: {time.time()-start_time}")
+                logger.info(f"    Batch [{batch + 1}/{len(train_dataloader)}], Loss: {loss.item():.4f}, Time: {time.time()-start_time:.2f}s")
         if (epoch + 1) % checkpoint_interval == 0:
-            save_checkpoint(epoch, batch, model, optimizer, loss, output_dir)
+            save_checkpoint(epoch, model, optimizer, loss, output_dir)
         validate_model(model, val_dataloader, device)
-    save_model(model, os.path.join(output_dir,"final_model.pth"))
+    save_model(model, os.path.join(output_dir, "final_model.pth"))
 
-def save_checkpoint(epoch, batch, model, optimizer, loss, output_dir):
-    checkpoint_path = os.path.join(output_dir,f"checkpoint_epoch{epoch}.pth")
+
+def save_checkpoint(epoch, model, optimizer, loss, output_dir):
+    """
+    Save model checkpoint.
+
+    Args:
+        epoch (int): Current epoch.
+        model (nn.Module): Model.
+        optimizer (torch.optim.Optimizer): Optimizer.
+        loss (torch.Tensor): Loss.
+        output_dir (str): Directory to save checkpoint.
+
+    Returns:
+        None
+    """
+    checkpoint_path = os.path.join(output_dir, f"checkpoint_epoch{epoch}.pth")
     torch.save({
         'epoch': epoch,
-        'step': batch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }, checkpoint_path)
 
-# Validation loop
+
 def validate_model(model, val_dataloader, device):
+    """
+    Validate the model.
+
+    Args:
+        model (nn.Module): Model.
+        val_dataloader (DataLoader): Validation DataLoader.
+        device (torch.device): Device to validate on.
+
+    Returns:
+        None
+    """
     model.eval()
     val_loss = 0
     correct = 0
@@ -276,12 +387,35 @@ def validate_model(model, val_dataloader, device):
 
     val_predictions, val_labels = make_predictions(model, val_dataloader, device)
     accuracy = (val_predictions == val_labels).mean()
-    logger.info(f"Accuracy:{accuracy}")
+    logger.info(f"Accuracy: {accuracy:.2f}")
+
+
 def save_model(model, path):
+    """
+    Save the model.
+
+    Args:
+        model (nn.Module): Model.
+        path (str): Path to save the model.
+
+    Returns:
+        None
+    """
     torch.save(model.state_dict(), path)
 
-# Make predictions on the entire dataset
+
 def make_predictions(model, dataloader, device):
+    """
+    Make predictions on the dataset.
+
+    Args:
+        model (nn.Module): Model.
+        dataloader (DataLoader): DataLoader.
+        device (torch.device): Device.
+
+    Returns:
+        Tuple: Predictions and labels.
+    """
     model.eval()
     all_predictions = []
     all_labels = []
@@ -296,13 +430,24 @@ def make_predictions(model, dataloader, device):
             all_labels.extend(labels)
     return np.array(all_predictions), np.array(all_labels)
 
-# Plot confusion matrix
-def plot_confusion_matrix(all_labels, all_predictions, outputdir):
+
+def plot_confusion_matrix(all_labels, all_predictions, output_dir):
+    """
+    Plot confusion matrix.
+
+    Args:
+        all_labels (np.ndarray): Ground truth labels.
+        all_predictions (np.ndarray): Predicted labels.
+        output_dir (str): Directory to save the plot.
+
+    Returns:
+        None
+    """
     cm = confusion_matrix(all_labels, all_predictions)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
     plt.xlabel("Predicted Labels")
     plt.ylabel("True Labels")
     plt.title("Confusion Matrix")
-    plt.savefig(os.path.join(outputdir,"confusion_matrix.png"))
+    plt.savefig(os.path.join(output_dir, "confusion_matrix.png"))
     plt.show()
