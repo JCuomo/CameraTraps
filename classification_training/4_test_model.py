@@ -5,20 +5,13 @@ import os
 
 import torch
 
-from CameraTraps.classification_training.fine_tuning_vit import create_dataloader, get_or_create_splits, get_transform, make_predictions, plot_confusion_matrix
+from classification.utils import initialize_model
+from classification_training.training_utils import create_dataloader, get_or_create_splits, get_transform, make_predictions, plot_confusion_matrix
 from transformers import ViTForImageClassification
 
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-def load_model_from_checkpoint(checkpoint_path, num_classes):
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224")
-    num_features = model.config.hidden_size
-    model.classifier = torch.nn.Linear(num_features, num_classes)
-    model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
-    return model
-
 
 
 
@@ -33,7 +26,7 @@ if __name__ == "__main__":
 
     # Load model from checkpoint
     num_classes = len(label_dict.keys())
-    model = load_model_from_checkpoint(checkpoint_path, num_classes)
+    model = initialize_model(num_classes,checkpoint_path)
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model.to(device)
 

@@ -10,7 +10,7 @@ trains a model given 2 json files:
 import logging
 
 
-from classification_training.fine_tuning_vit import augment_minority_classes, create_dataloader, get_optimizer, get_or_create_splits, get_transform, initialize_model, make_predictions, plot_confusion_matrix, train_model
+from CameraTraps.classification_training.training_utils import augment_minority_classes, create_dataloader, get_optimizer, get_or_create_splits, get_transform, initialize_model, make_predictions, plot_confusion_matrix, train_model
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     checkpoint_interval = 1
     transform = get_transform()
-    model = initialize_model(label_dict)
+    model = initialize_model(len(label_dict))
     device = "cuda:0"
     optimizer = get_optimizer(model)
 

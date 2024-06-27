@@ -13,18 +13,18 @@ import time
 import json
 import numpy as np
 import os
-from collections.abc import Sequence
 from PIL import Image, ImageOps
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from transformers import ViTForImageClassification
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.nn.functional as F
+
+from classification.utils import preprocess_image
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -110,51 +110,17 @@ def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
     labels_names = sorted(list(set(label for _, label in labels_train + labels_val + labels_test)))
     label_dict = {class_name: label for label, class_name in enumerate(labels_names)}
     reversed_label_dict = {label_number: class_name for class_name, label_number in label_dict.items()}
-    
+    with open(os.path.join(splits_dir,'label_mapping.json'), 'w') as f:
+        json.dump(reversed_label_dict, f)
     return images_train, labels_train, images_val, labels_val, images_test, labels_test, label_dict, reversed_label_dict
 
 
-def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
-    """
-    Crops an image.
-
-    Args:
-        img (Image.Image): PIL Image object.
-        bbox_norm (list/tuple): Normalized coordinates [xmin, ymin, width, height].
-        square_crop (bool): Whether to crop bounding boxes as a square.
-
-    Returns:
-        Image.Image: Cropped image.
-    """
-    img_w, img_h = img.size
-    xmin = int(bbox_norm[0] * img_w)
-    ymin = int(bbox_norm[1] * img_h)
-    box_w = int(bbox_norm[2] * img_w)
-    box_h = int(bbox_norm[3] * img_h)
-
-    if square_crop:
-        box_size = max(box_w, box_h)
-        xmin = max(0, min(xmin - int((box_size - box_w) / 2), img_w - box_size))
-        ymin = max(0, min(ymin - int((box_size - box_h) / 2), img_h - box_size))
-        box_w = box_size
-        box_h = box_size
-
-    if box_w == 0 or box_h == 0:
-        return None
-
-    crop = img.crop((xmin, ymin, xmin + box_w, ymin + box_h))
-
-    if square_crop:
-        crop = ImageOps.pad(crop, size=(box_size, box_size), color=0)
-
-    return crop
 
 
-class CustomDataset(Dataset):
-    def __init__(self, images, labels, label_dict, transform=None):
+class TrainingDataset(Dataset):
+    def __init__(self, images, labels, label_dict):
         self.images = images
         self.labels = labels
-        self.transform = transform
         self.label_dict = label_dict
 
     def __len__(self):
@@ -164,10 +130,7 @@ class CustomDataset(Dataset):
         image_path_idx, bbox = self.images[idx]
         image_name = image_path_idx[:image_path_idx.rfind("_")]
         try:
-            full_image = Image.open(image_name)
-            crop_image = get_crop(full_image, bbox, square_crop=True)
-            if crop_image is None:
-                raise ValueError("Invalid crop dimensions")
+            cropped_image = preprocess_image(image_name, bbox)
         except Exception as e:
             logger.error(f"Error loading or cropping image: {image_name}, {e}")
             return None, None
@@ -176,45 +139,12 @@ class CustomDataset(Dataset):
         if image_path_idx_label != image_path_idx:
             logger.debug("MISMATCH!!!!!", image_path_idx_label, image_path_idx, idx)
 
-        if self.transform:
-            crop_image = self.transform(crop_image)
-
-        return crop_image, self.label_dict[label]
+        return cropped_image, self.label_dict[label]
 
 
-def get_transform():
-    """
-    Get the transformation pipeline.
-
-    Returns:
-        transforms.Compose: Transform pipeline.
-    """
-    return transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
 
 
-def initialize_model(label_dict):
-    """
-    Initialize the Vision Transformer model.
-
-    Args:
-        label_dict (dict): Dictionary mapping labels to numerical values.
-
-    Returns:
-        ViTForImageClassification: Initialized model.
-    """
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224")
-    for param in model.parameters():
-        param.requires_grad = False
-    num_features = model.config.hidden_size
-    num_classes = len(label_dict)
-    model.classifier = nn.Linear(num_features, num_classes)
-    return model
-
-
-def create_dataloader(images, labels, label_dict, transform, batch_size=32, shuffle=False):
+def create_dataloader(images, labels, label_dict, batch_size=32, shuffle=False):
     """
     Create a DataLoader.
 
@@ -222,14 +152,13 @@ def create_dataloader(images, labels, label_dict, transform, batch_size=32, shuf
         images (list): List of image paths and bounding boxes.
         labels (list): List of labels.
         label_dict (dict): Dictionary mapping labels to numerical values.
-        transform (transforms.Compose): Transform pipeline.
         batch_size (int): Batch size.
         shuffle (bool): Whether to shuffle the data.
 
     Returns:
         DataLoader: DataLoader object.
     """
-    dataset = CustomDataset(images, labels, label_dict, transform=transform)
+    dataset = TrainingDataset(images, labels, label_dict)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count(), pin_memory=True)
 
 def augment_minority_classes(images, labels, label_dict, augmentations=None, augmentation_factor=2):
@@ -312,6 +241,7 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, device, outp
         None
     """
     model.to(device)
+    best_val_loss = float('inf')  
     start_time = time.time()
     for epoch in range(num_epochs):
         logger.info(f"Epoch [{epoch + 1}/{num_epochs}]")
@@ -329,10 +259,25 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, device, outp
             if (batch + 1) % 20 == 0:
                 logger.info(f"    Batch [{batch + 1}/{len(train_dataloader)}], Loss: {loss.item():.4f}, Time: {time.time()-start_time:.2f}s")
         if (epoch + 1) % checkpoint_interval == 0:
+            val_loss: float = validate_model(model, val_dataloader, device)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss    
+                save_model(model, os.path.join(output_dir, f"best_model_e{epoch}.pth"))
             save_checkpoint(epoch, model, optimizer, loss, output_dir)
-        validate_model(model, val_dataloader, device)
-    save_model(model, os.path.join(output_dir, "final_model.pth"))
 
+
+def save_model(model, path):
+    """
+    Save the model.
+
+    Args:
+        model (nn.Module): Model.
+        path (str): Path to save the model.
+
+    Returns:
+        None
+    """
+    torch.save(model.state_dict(), path)
 
 def save_checkpoint(epoch, model, optimizer, loss, output_dir):
     """
@@ -383,25 +328,9 @@ def validate_model(model, val_dataloader, device):
             _, predicted = torch.max(logits, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-    logger.info(f"Validation Loss: {val_loss / len(val_dataloader):.4f}, Validation Accuracy: {100 * correct / total:.2f}%")
-
-    val_predictions, val_labels = make_predictions(model, val_dataloader, device)
-    accuracy = (val_predictions == val_labels).mean()
-    logger.info(f"Accuracy: {accuracy:.2f}")
-
-
-def save_model(model, path):
-    """
-    Save the model.
-
-    Args:
-        model (nn.Module): Model.
-        path (str): Path to save the model.
-
-    Returns:
-        None
-    """
-    torch.save(model.state_dict(), path)
+    average_loss: float | torch.Tensor = val_loss / len(val_dataloader)
+    logger.info(f"Validation Loss: {average_loss:.4f}, Validation Accuracy: {100 * correct / total:.2f}%")
+    return average_loss
 
 
 def make_predictions(model, dataloader, device):

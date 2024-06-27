@@ -2,6 +2,10 @@ import os
 import re
 import matplotlib.pyplot as plt
 
+
+"""
+Using the logs from 3_fine_tune_vit.py plots validation and training loss plot
+"""
 # Function to read the log file and extract losses
 def extract_losses(log_file):
     epoch_pattern = re.compile(r"INFO:classification_training.fine_tuning_vit:Epoch \[(\d+)/\d+\]")
