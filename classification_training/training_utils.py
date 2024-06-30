@@ -24,7 +24,8 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.nn.functional as F
 
-from classification.utils import preprocess_image
+from CameraTraps.classification.utils import preprocess_image
+
 
 # Set up logging
 logger = logging.getLogger(__name__)

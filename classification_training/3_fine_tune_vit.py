@@ -10,7 +10,8 @@ trains a model given 2 json files:
 import logging
 
 
-from CameraTraps.classification_training.training_utils import augment_minority_classes, create_dataloader, get_optimizer, get_or_create_splits, get_transform, initialize_model, make_predictions, plot_confusion_matrix, train_model
+from CameraTraps.classification.utils import get_transform,initialize_model
+from CameraTraps.classification_training.training_utils import augment_minority_classes, create_dataloader, get_optimizer, get_or_create_splits,  make_predictions, plot_confusion_matrix, train_model
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

@@ -24,23 +24,26 @@ logging.basicConfig(level=logging.INFO)
 
 def get_bboxes(detections_json, output_file):
     confidence_threshold = 0.2
-    bboxes = []
+    output = {}
     with open(detections_json, "r") as file:
         data = json.load(file)
         for image_data in data["images"]:
+
+            bboxes = []
             image_path = image_data["file"]
 
             if "failure" in image_data:
                 continue
 
             for n, bbox in enumerate(image_data["detections"]):
-                if bbox["conf"] > confidence_threshold:
-                    bboxes.append([f"{image_path}_{n}", bbox["bbox"]])
-    
+                conf = bbox["conf"]
+                if conf > confidence_threshold:
+                    bboxes.append((bbox["bbox"],conf))
+            output[image_path] = bboxes
     # Save to a JSON file
     with open(output_file, 'w') as file:
-        json.dump(bboxes, file)
-    return bboxes
+        json.dump(output, file)
+    return output
 
 def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
     """
