@@ -22,6 +22,25 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+def get_bboxes(detections_json, output_file):
+    confidence_threshold = 0.2
+    bboxes = []
+    with open(detections_json, "r") as file:
+        data = json.load(file)
+        for image_data in data["images"]:
+            image_path = image_data["file"]
+
+            if "failure" in image_data:
+                continue
+
+            for n, bbox in enumerate(image_data["detections"]):
+                if bbox["conf"] > confidence_threshold:
+                    bboxes.append([f"{image_path}_{n}", bbox["bbox"]])
+    
+    # Save to a JSON file
+    with open(output_file, 'w') as file:
+        json.dump(bboxes, file)
+    return bboxes
 
 def get_crop(img: Image.Image, bbox_norm, square_crop: bool):
     """
@@ -78,7 +97,7 @@ def preprocess_image(image_path, bbox):
     if crop_image is None:
         raise ValueError("Invalid crop dimensions")
 
-    return get_transform().transform(crop_image)
+    return get_transform()(crop_image)
 
 
 def initialize_model(num_classes=None, checkpoint_path=None):
@@ -98,6 +117,8 @@ def initialize_model(num_classes=None, checkpoint_path=None):
         num_classes_from_checkpoint = model_state_dict['classifier.weight'].size(0)
         if num_classes and num_classes!=num_classes_from_checkpoint:
             logger.warning("MISMATCH between num_classes and checkpoint")
+        else:
+            num_classes=num_classes_from_checkpoint
     if not num_classes and not checkpoint:
         raise ValueError("You must provide at least one of num_classes and/or checkpoint_path")
     model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224")

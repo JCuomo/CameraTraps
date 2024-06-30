@@ -7,6 +7,7 @@ trains a model given 2 json files:
 - <images_name>_labels.json: containing the image name and the corresponding label that should be unique to animal occurences (i.e. same for all bboxes)
 """
 
+import json
 import logging
 import os
 import numpy as np
@@ -14,7 +15,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 
-from classification.utils import initialize_model, preprocess_image
+from utils import initialize_model, preprocess_image
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def create_dataloader(images, batch_size=32):
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count(), pin_memory=True)
 
 def _classify_image(model, image):
-    logits = model(image).logits
+    logits = model(image.unsqueeze(0)).logits
     probabilities = F.softmax(logits, dim=1)
     predicted_prob, predicted_class = torch.max(probabilities, 1)
     return predicted_class.item(), predicted_prob.item()
@@ -64,6 +65,7 @@ def classify_dataloader(model, dataloader, device):
             all_predictions.extend(batch_pred)
     return np.array(all_predictions)
 
+
 if __name__ == "__main__":
 
     # Load model from checkpoint
@@ -72,8 +74,13 @@ if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
+    bboxes_file = "/home/jcuomo/CameraTraps/output/detection/test_bboxes.json"
+    # Load from the JSON file
+    with open(bboxes_file, 'r') as file:
+        images = json.load(file)
+
     # Create dataloader
     dataloader = create_dataloader(images, batch_size=128)
-
     # Make predictions and plot confusion matrix
-    predictions, labels = make_predictions(model, test_dataloader, device)
+    predictions = classify_dataloader(model, dataloader, device)
+    print(predictions)
