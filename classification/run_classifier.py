@@ -16,7 +16,14 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 
 from utils import initialize_model, preprocess_image
+import warnings
 
+# Define a function to filter out the specific warning
+def ignore_tensor_warning(message, category, filename, lineno, file=None, line=None):
+    return "To copy construct from a tensor" not in str(message)
+
+# Register the filter function to ignore the warning
+warnings.showwarning = ignore_tensor_warning
 # Set up logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -40,17 +47,31 @@ class ImagesDataset(Dataset):
         for bbox, conf in bboxes_confs:
             sample = {
                 'image': preprocess_image(image_path, bbox),
+                'image_path': image_path,
                 'bbox': bbox,
                 'bbox_confidence': conf
             }
             samples.append(sample)
         return samples
     
-
 def collate_fn(batch):
-    return torch.stack(batch[0])
+    """
+    Custom collate function to batch images and their corresponding bounding boxes.
+    """
+    batch = batch[0]
+    images = [torch.tensor(sample['image']) for sample in batch]
+    bboxes = [sample['bbox'] for sample in batch]
+    image_path = [sample['image_path'] for sample in batch]
+    confidences = [sample['bbox_confidence'] for sample in batch]
+    
+    return {
+        'images': torch.stack(images),
+        'bboxes': bboxes,
+        'image_path': image_path,
+        'bbox_confidence': confidences
+    }
 
-def create_dataloader(images_dict, batch_size=32):
+def create_dataloader(images_dict):
     """
     Create a DataLoader.
 
@@ -65,23 +86,27 @@ def create_dataloader(images_dict, batch_size=32):
     # Note: batch_size=1 because batches are define within ImagesDataset as a batch corresponds to all the bboxes of 1 image
     return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=os.cpu_count(), pin_memory=True, collate_fn=collate_fn)
 
-def classify_dataloader(model, dataloader, device):
+def classify_dataloader(model, dataloader, label_mapping, device):
     model.eval()
     output= {}
     with torch.no_grad():
-        for image_path,images, bboxes in dataloader:
-            all_predictions = []
-            images = images.to(device)
+        for batch in dataloader:
+            batch_output = []
+            images = batch['images'].to(device)
+            image_paths = batch['image_path'] # all items should be the same
+            bboxes = batch['bboxes']
+            bbox_confidences = batch['bbox_confidence']
             logits = model(images).logits
             probabilities = F.softmax(logits, dim=1)
             predicted_probs, predicted_classes = torch.max(probabilities, 1)
-            
-            # batch_predictions = []
-            # for i in range(len(bboxes)):
-            #     prediction = (predicted_classes[i].cpu().numpy(), predicted_probs[i].cpu().numpy())
-            #     batch_predictions.append(prediction)
-            all_predictions.extend(list(zip(predicted_classes.cpu(),predicted_probs.cpu())))
-            output[image_path] = (pred_class, pred_class_prob, bbox, bbox_prob)
+            for image_path, pred_class, pred_class_prob, bbox, bbox_prob in zip(image_paths, predicted_classes, predicted_probs, bboxes, bbox_confidences):
+                batch_output.append({
+                    'pred_class': label_mapping.get(pred_class.cpu().item()),
+                    'pred_class_prob': pred_class_prob.cpu().item(),
+                    'bbox': bbox,
+                    'bbox_prob': bbox_prob
+                })
+            output[image_path]=batch_output
     return output
 
 
@@ -93,9 +118,9 @@ if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
-bboxes_file = "/home/jcuomo/CameraTraps/output/detection/test_bboxes.json"
-with open(bboxes_file, 'r') as file:
-    images_bboxes = json.load(file)
+    bboxes_file = "/home/jcuomo/CameraTraps/output/detection/test_bboxes.json"
+    with open(bboxes_file, 'r') as file:
+        images_bboxes = json.load(file)
 
     label_mapping_file = "/home/jcuomo/CameraTraps/output/classification/step3/label_mapping.json"
     with open(label_mapping_file, 'r') as file:
@@ -104,10 +129,9 @@ with open(bboxes_file, 'r') as file:
     label_mapping = {int(k): v for k, v in label_mapping.items()}
 
     # Create dataloader
-    dataloader = create_dataloader(images_bboxes, batch_size=128)
+    dataloader = create_dataloader(images_bboxes)
     # Make predictions and plot confusion matrix
-    predictions = classify_dataloader(model, dataloader, device)
-
-    predictions = [(label_mapping.get(pred.item()), prob.item()) for pred, prob in predictions]
+    predictions = classify_dataloader(model, dataloader, label_mapping, device)
                                          
     print(predictions)
+
