@@ -11,7 +11,7 @@ import logging
 
 
 from CameraTraps.classification.utils import get_transform,initialize_model
-from CameraTraps.classification_training.training_utils import augment_minority_classes, create_dataloader, get_optimizer, get_or_create_splits,  make_predictions, plot_confusion_matrix, train_model
+from CameraTraps.classification_training.training_utils import augment_minority_classes, create_training_dataloader, get_optimizer, get_or_create_splits,  make_predictions, plot_confusion_matrix, train_model
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -37,13 +37,13 @@ if __name__ == "__main__":
     optimizer = get_optimizer(model)
 
     images_train, labels_train = augment_minority_classes(images_train, labels_train, label_dict)
-    train_dataloader = create_dataloader(images_train, labels_train, label_dict, transform, batch_size=batch_size, shuffle=True)
-    val_dataloader = create_dataloader(images_val, labels_val, label_dict, transform, batch_size=batch_size, shuffle=False)
+    train_dataloader = create_training_dataloader(images_train, labels_train, label_dict, transform, batch_size=batch_size, shuffle=True)
+    val_dataloader = create_training_dataloader(images_val, labels_val, label_dict, transform, batch_size=batch_size, shuffle=False)
 
     train_model(model, train_dataloader, val_dataloader, optimizer, device, output_dir,num_epochs=num_epochs, checkpoint_interval=checkpoint_interval)
 
     # step3: check the model
-    test_dataloader = create_dataloader(images_test, labels_test, label_dict, transform, batch_size=batch_size, shuffle=False)
+    test_dataloader = create_training_dataloader(images_test, labels_test, label_dict, transform, batch_size=batch_size, shuffle=False)
     test_predictions, test_labels= make_predictions(model, test_dataloader, device)
     accuracy = (test_predictions == test_labels).mean()
     logger.info(f"Accuracy:{accuracy}")

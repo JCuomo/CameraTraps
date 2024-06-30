@@ -6,7 +6,7 @@ import os
 import torch
 
 from classification.utils import initialize_model
-from classification_training.training_utils import create_dataloader, get_or_create_splits, get_transform, make_predictions, plot_confusion_matrix
+from classification_training.training_utils import create_training_dataloader, get_or_create_splits, get_transform, make_predictions, plot_confusion_matrix
 from transformers import ViTForImageClassification
 
 
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     # Create test dataloader
     transform = get_transform()
-    test_dataloader = create_dataloader(images_test, labels_test, label_dict, transform, batch_size=128, shuffle=False)
+    test_dataloader = create_training_dataloader(images_test, labels_test, label_dict, transform, batch_size=128, shuffle=False)
 
     # Make predictions and plot confusion matrix
     test_predictions, test_labels = make_predictions(model, test_dataloader, device)

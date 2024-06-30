@@ -145,7 +145,7 @@ class TrainingDataset(Dataset):
 
 
 
-def create_dataloader(images, labels, label_dict, batch_size=32, shuffle=False):
+def create_training_dataloader(images, labels, label_dict, batch_size=32, shuffle=False):
     """
     Create a DataLoader.
 
