@@ -66,7 +66,7 @@ def scatter_plot(counts1, counts2):
 
 
 if __name__ == "__main__":
-    images_dir = "/home/jcuomo/CameraTraps/images/labeled/Cameras 1"
+    images_dir = "/home/jcuomo/images/CH08__P40406151__V2"
     detections_file = "/home/jcuomo/CameraTraps/output/detection_training/detections.json"
     
     n_detections = count_detections(detections_file)
