@@ -66,7 +66,7 @@ def scatter_plot(counts1, counts2):
 
 
 if __name__ == "__main__":
-    images_dir = "/home/jcuomo/images/CH08__P40406151__V2"
+    images_dir = "/home/jcuomo/images"
     detections_file = "/home/jcuomo/CameraTraps/output/detection_training/detections.json"
     
     n_detections = count_detections(detections_file)
@@ -77,3 +77,23 @@ if __name__ == "__main__":
     print("Mean Absolute Difference:", mean_absolute_difference(n_counts, n_detections))
     print("RMSE:", rmse(n_counts, n_detections))
     scatter_plot(n_counts, n_detections)        
+
+    N=0
+    good=0
+    over=0
+    under=0
+    for path, detection_number in n_detections.items():
+        count_number = n_counts[path]
+        N+=1
+        if detection_number == count_number:
+            category = "good"
+            good+=1
+        elif detection_number < count_number:
+            category = "over"
+            over+=1
+        else:
+            category = "under"
+            under+=1
+
+    result_str = f"good:{good/N*100:.1f}, over:{over/N*100:.1f}, under:{under/N*100:.1f}"
+    print(result_str)
