@@ -165,17 +165,17 @@ def merge_labels(labels_dir):
 
 
 if __name__ == "__main__":
-    images_dir = "/home/jcuomo/CameraTraps/images/labeled"
-    output_dir = "/home/jcuomo/CameraTraps/output/classification/step1_output"
+    images_dir = "/home/jcuomo/images"
+    output_dir = "/home/jcuomo/CameraTraps/output/classification/step1"
     # Step 1: find what species are in the photos and 
     # manually make sure there is consistency in the naming
     # estimated time in 12 core: 0.025sec per image
-    # list_species_in_images_threads(images_dir, output_dir)
+    list_species_in_images_threads(images_dir, output_dir)
 
     # Step 2: filter images with only one specie
-    # st = time.time()
-    # filter_single_species_images(images_dir, output_dir)
-    # print("single thread:",time.time()-st)
+    st = time.time()
+    filter_single_species_images(images_dir, output_dir)
+    print("single thread:",time.time()-st)
 
     # Step 3: merge *_labels.json to all_labels.json
     merge_labels(output_dir)

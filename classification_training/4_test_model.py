@@ -5,8 +5,8 @@ import os
 
 import torch
 
-from classification.utils import initialize_model
-from classification_training.training_utils import create_training_dataloader, get_or_create_splits, get_transform, make_predictions, plot_confusion_matrix
+from classification.utils import get_transform, initialize_model
+from classification_training.training_utils import create_training_dataloader, get_or_create_splits, make_predictions, plot_confusion_matrix
 from transformers import ViTForImageClassification
 
 
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 if __name__ == "__main__":
     # Paths and parameters
     output_dir = "/home/jcuomo/CameraTraps/output/classification/step3"
-    checkpoint_path = os.path.join(output_dir, "checkpoint_epoch0.pth")
+    checkpoint_path = os.path.join(output_dir, "final_model.pth")
     splits_dir = output_dir
 
     # Load splits

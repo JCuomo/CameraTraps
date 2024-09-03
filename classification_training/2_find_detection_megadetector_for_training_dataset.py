@@ -15,6 +15,6 @@ if __name__ == "__main__":
     st: float = time.time()
     run_megadetector_on_dir(images_json_dir, megadetector_script, model, output_dir)
     print("Megadetector:",time.time()-st)
-    # js="/home/jcuomo/CameraTraps/output/classification/step1_output/CAR__090113__01__Carrion_images.json"
+    # js="/home/jcuomo/CameraTraps/output/classification/step1/CAR__090113__01__Carrion_images.json"
     # run_megadetector_on_file(js, megadetector_script, model)
     merge_detections(images_json_dir)

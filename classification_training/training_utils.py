@@ -90,8 +90,9 @@ def get_or_create_splits(splits_dir, detections_json=None, labels_json=None):
 
                     for n, bbox in enumerate(image_data["detections"]):
                         if bbox["conf"] > confidence_threshold:
-                            images_info.append((f"{image_data['file']}_{n}", bbox["bbox"]))
-                            labels_info.append((f"{image_data['file']}_{n}", gt_labels[image_path]))
+                            if image_path in gt_labels:
+                                labels_info.append((f"{image_data['file']}_{n}", gt_labels[image_path]))
+                                images_info.append((f"{image_data['file']}_{n}", bbox["bbox"]))
         
         logger.info(f"Dataset size: {len(images_info)}")
         logger.info(f"Labels count: {len(labels_info)}")

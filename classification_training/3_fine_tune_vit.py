@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # step1: create the train|val|test splits
     output_dir = "/home/jcuomo/CameraTraps/output/classification/step3"
     detections_json = "/home/jcuomo/CameraTraps/output/classification/step2/all_detections.json"
-    labels_json = "/home/jcuomo/CameraTraps/output/classification/step2/all_labels.json"
+    labels_json = "/home/jcuomo/CameraTraps/output/classification/step1/all_labels.json"
     images_train,labels_train,images_val,labels_val,images_test,labels_test,label_dict,reversed_label_dict = get_or_create_splits(output_dir, detections_json=detections_json, labels_json=labels_json)
 
     logger.info(f"Labels:{label_dict}")

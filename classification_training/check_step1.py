@@ -37,7 +37,7 @@ def compare_folder_names(dir_with_files, dir_with_folders):
         print("Folders in dir_with_folders not in dir_with_files:", folder_names_from_directories - folder_names_from_files)
 
 # Example usage:
-dir_with_files = '/home/jcuomo/CameraTraps/output/classification/step1_output'
+dir_with_files = '/home/jcuomo/CameraTraps/output/classification/step1'
 dir_with_folders = '/home/jcuomo/CameraTraps/images/labeled'
 
 

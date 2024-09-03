@@ -120,9 +120,7 @@ def get_counts(image_path, failed_file=None, indet_file=None):
 
 def get_counts_dir(images_dir):
     """
-    Check metadata of images recursively found in images_dir and writes:
-     - species.txt with a list of unique species in A__Species
-     - species_count.txt with a list of unique species in B__No
+    Check metadata of images recursively found in images_dir and returns a dict(image_path,count)
     """
 
     image_files = []

@@ -21,7 +21,7 @@ SCRIPT_DIR=$(dirname "$(realpath "$0")")
 MODEL_URL="https://github.com/agentmorris/MegaDetector/releases/download/v5.0/md_v5a.0.0.pt"
 MEGADETECTOR_REPO="https://github.com/agentmorris/MegaDetector"
 YOLV5_REPO="https://github.com/ultralytics/yolov5"
-RELATIVE_DOWNLOAD_DIR="$SCRIPT_DIR/../downloads"
+RELATIVE_DOWNLOAD_DIR="$SCRIPT_DIR/downloads"
 DOWNLOAD_DIR=$(realpath "$RELATIVE_DOWNLOAD_DIR")
 echo DOWNLOAD_DIR $DOWNLOAD_DIR
 MODEL_PATH="$DOWNLOAD_DIR/md_v5a.0.0.pt"
